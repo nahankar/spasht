@@ -1,0 +1,159 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                String            @id @default(cuid())
+  clerkId           String            @unique
+  email             String            @unique
+  firstName         String?
+  lastName          String?
+  profileImage      String?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  
+  // Profile information
+  resumeUrl         String?
+  targetRole        String?
+  experienceLevel   ExperienceLevel   @default(FRESHER)
+  
+  // Interview sessions
+  sessions          InterviewSession[]
+  
+  // Gamification
+  streakCount       Int               @default(0)
+  lastSessionDate   DateTime?
+  totalPoints       Int               @default(0)
+  badges            UserBadge[]
+  
+  @@map("users")
+}
+
+model InterviewSession {
+  id                String             @id @default(cuid())
+  userId            String
+  user              User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  // Session details
+  type              InterviewType
+  duration          Int                // in seconds
+  jobDescription    String?
+  questions         Json               // Array of questions asked
+  
+  // Audio/Video recordings
+  audioUrl          String?
+  videoUrl          String?
+  
+  // Analysis results
+  transcription     String?
+  overallScore      Float?             // 0-100
+  fluencyScore      Float?
+  confidenceScore   Float?
+  clarityScore      Float?
+  
+  // Detailed feedback
+  fillerWords       Json?              // Array of filler words detected
+  speakingPace      Float?             // words per minute
+  suggestions       Json?              // Array of improvement suggestions
+  
+  // Timestamps
+  startedAt         DateTime           @default(now())
+  completedAt       DateTime?
+  
+  @@map("interview_sessions")
+}
+
+model UserBadge {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  badgeType BadgeType
+  earnedAt  DateTime  @default(now())
+  
+  @@unique([userId, badgeType])
+  @@map("user_badges")
+}
+
+enum AsrProvider {
+  TRANSCRIBE
+  NOVA_REALTIME
+  WEBSPEECH_FALLBACK
+}
+
+enum FailoverMode {
+  FIXED
+  AUTO_SWITCH
+}
+
+model FeatureConfig {
+  id                     Int           @id // single row; use id = 1
+  asrProvider            AsrProvider   @default(TRANSCRIBE)
+  failoverMode           FailoverMode  @default(FIXED)
+  language               String        @default("en-US")
+  nudgesRateLimitPerMin  Int           @default(20)
+  reportPerSessionLimit  Int           @default(2)
+  dataRetentionDays      Int           @default(90)
+  piiRedactionEnabled    Boolean       @default(false)
+  auditEnabled           Boolean       @default(true)
+  updatedBy              String?
+  createdAt              DateTime      @default(now())
+  updatedAt              DateTime      @updatedAt
+
+  @@map("feature_config")
+}
+
+model AdminAudit {
+  id         String   @id @default(cuid())
+  actorId    String
+  action     String
+  details    Json?
+  createdAt  DateTime @default(now())
+
+  @@index([actorId, createdAt])
+  @@map("admin_audit")
+}
+
+model SessionEvent {
+  id         String             @id @default(cuid())
+  sessionId  String
+  session    InterviewSession   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  type       String
+  ts         DateTime           @default(now())
+  payload    Json?
+
+  @@index([sessionId, ts])
+  @@map("session_events")
+}
+
+enum ExperienceLevel {
+  FRESHER
+  JUNIOR
+  MID_LEVEL
+  SENIOR
+}
+
+enum InterviewType {
+  HR_BEHAVIORAL
+  TECHNICAL
+  CASE_STUDY
+  GROUP_DISCUSSION
+  PRESENTATION
+}
+
+enum BadgeType {
+  FIRST_SESSION
+  WEEK_STREAK
+  MONTH_STREAK
+  PERFECT_SCORE
+  FLUENCY_MASTER
+  CONFIDENCE_BOOST
+  GRAMMAR_GURU
+}

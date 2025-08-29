@@ -1,5 +1,5 @@
 {
-  "name": "ukti-app",
+  "name": "spasht",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -9,19 +9,50 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@aws-crypto/sha256-js": "^5.2.0",
+    "@aws-sdk/client-bedrock-runtime": "^3.864.0",
+    "@aws-sdk/client-polly": "^3.864.0",
+    "@aws-sdk/client-rekognition": "^3.864.0",
+    "@aws-sdk/client-s3": "^3.864.0",
+    "@aws-sdk/client-transcribe-streaming": "^3.866.0",
+    "@aws-sdk/protocol-http": "^3.370.0",
+    "@aws-sdk/signature-v4": "^3.370.0",
+    "@clerk/nextjs": "^6.31.2",
+    "@hookform/resolvers": "^5.2.1",
+    "@prisma/client": "^6.14.0",
+    "@radix-ui/react-slot": "^1.2.3",
+    "@trpc/client": "^11.4.4",
+    "@trpc/next": "^11.4.4",
+    "@trpc/react-query": "^11.4.4",
+    "@trpc/server": "^11.4.4",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "framer-motion": "^12.23.12",
+    "lucide-react": "^0.540.0",
+    "next": "15.4.7",
+    "prisma": "^6.14.0",
     "react": "19.1.0",
     "react-dom": "19.1.0",
-    "next": "15.4.7"
+    "react-hook-form": "^7.62.0",
+    "recordrtc": "^5.6.2",
+    "socket.io": "^4.8.1",
+    "socket.io-client": "^4.8.1",
+    "tailwind-merge": "^3.3.1",
+    "webrtc-adapter": "^9.0.3",
+    "zod": "^4.0.17"
   },
   "devDependencies": {
-    "typescript": "^5",
+    "@eslint/eslintrc": "^3",
+    "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "@tailwindcss/postcss": "^4",
-    "tailwindcss": "^4",
+    "@types/recordrtc": "^5.6.14",
+    "@types/socket.io": "^3.0.1",
+    "@types/socket.io-client": "^1.4.36",
     "eslint": "^9",
     "eslint-config-next": "15.4.7",
-    "@eslint/eslintrc": "^3"
+    "tailwindcss": "^4",
+    "typescript": "^5"
   }
 }
