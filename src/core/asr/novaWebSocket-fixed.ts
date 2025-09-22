@@ -778,6 +778,12 @@ export class NovaWebSocketAsr implements AsrProvider {
             // Stay in listening state to allow recovery
             this.setState("listening");
             console.log('🔄 AWS error handled - staying in listening state for recovery');
+            
+            // GPT-5 SYNC: If we had voice detections during ModelStreamError, treat as barge-in
+            if (message.error?.includes('ModelStreamErrorException') && !this.bargeInTriggered && this.consecutiveVoiceDetections > 0) {
+              console.log('🤝 GPT-5 SYNC: ModelStreamError during voice detection - confirming barge-in');
+              this.triggerBargeIn();
+            }
           } else {
             this.setState("error");
           }
@@ -1202,7 +1208,7 @@ export class NovaWebSocketAsr implements AsrProvider {
           
           // Only log every 2nd confirmation to reduce spam
           if (this.consecutiveVoiceDetections % 2 === 0) {
-            bargeLog(`🎤 🔍 INSTANT: Voice above threshold (${this.consecutiveVoiceDetections}/3 confirmations, volume: ${rms.toFixed(4)}, threshold: ${dynamicThreshold.toFixed(4)})`);
+            bargeLog(`🎤 🔍 INSTANT: Voice above threshold (${this.consecutiveVoiceDetections}/2 confirmations, volume: ${rms.toFixed(4)}, threshold: ${dynamicThreshold.toFixed(4)})`);
           }
           
           // GPT-5 TUNE: Confirm after 2 frames to reduce missed barges

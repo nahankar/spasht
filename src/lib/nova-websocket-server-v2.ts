@@ -894,10 +894,10 @@ class NovaSDKHandler {
               
               // Reduce logging for audio events to prevent spam
               if (eventType.includes('audioOutput')) {
-                // Comment out audioOutput logs - too spammy for barge-in debugging
-                // if (eventCount % 10 === 0) { 
-                //   console.log(`📨 Nova Sonic event: ${eventType} (batch ${Math.floor(eventCount/10)})`);
-                // }
+                // Log first few audio frames per turn to confirm delivery
+                if (eventCount <= 3) { 
+                  console.log(`📨 Nova Sonic event: ${eventType} (frame ${eventCount})`);
+                }
               } else if (eventType.includes('usageEvent')) {
                 // Comment out usageEvent logs - too frequent for barge-in debugging
                 // console.log(`📨 Nova Sonic event: ${eventType}`);
