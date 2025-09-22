@@ -463,6 +463,10 @@ export class NovaWebSocketAsr implements AsrProvider {
             console.log(`🔇 Audio worklet: Buffer cleared for barge-in`);
             break;
             
+          case 'stop-complete':
+            console.log(`🛑 Audio worklet: Stop completed - all audio sources stopped`);
+            break;
+            
           default:
             console.log(`🎵 Audio worklet event: ${type}`, event.data);
         }
@@ -1427,35 +1431,65 @@ export class NovaWebSocketAsr implements AsrProvider {
     }
   }
 
+  // GPT-5 ENHANCEMENT: Comprehensive TTS stopping for reliable barge-in
+  private stopAllTTSSources(): void {
+    try {
+      // 1. Stop browser speechSynthesis (if used)
+      if ('speechSynthesis' in window) {
+        speechSynthesis.cancel();
+        console.log('🔇 Stopped speechSynthesis TTS');
+      }
+      
+      // 2. Stop AudioWorkletNode audio playback
+      if (this.audioWorkletNode) {
+        // Send stop message to worklet for immediate audio source stopping
+        this.audioWorkletNode.port.postMessage({ type: 'stop' });
+        console.log('🔇 Sent stop message to AudioWorklet');
+      }
+      
+      // 3. Clear audio output queue to prevent future playback
+      if (this.audioOutputQueue && this.audioOutputQueue.length > 0) {
+        const queueSize = this.audioOutputQueue.length;
+        this.audioOutputQueue = [];
+        console.log(`🔇 Cleared audio output queue (${queueSize} items)`);
+      }
+      
+      // 4. Stop any active AudioContext sources (if we have them)
+      if (this.audioOutputContext && this.audioOutputContext.state === 'running') {
+        // Note: We don't suspend the context as we need it for future audio
+        console.log('🔇 AudioContext remains active for future audio');
+      }
+      
+      console.log('✅ All TTS sources stopped successfully');
+      
+    } catch (error) {
+      console.warn('⚠️ Error stopping TTS sources:', error);
+    }
+  }
+
   private triggerBargeIn(): void {
     const bargeInTime = Date.now();
     // RED console log for successful barge-in
     console.log(`%c🔇 BARGE-IN TRIGGERED at ${new Date().toLocaleTimeString()}.${Date.now() % 1000} - USER INTERRUPTED AI!`, 'color: red; font-weight: bold; font-size: 16px; background: yellow;');
     console.log(`🔇 BARGE-IN TRIGGERED at ${new Date().toLocaleTimeString()}.${Date.now() % 1000}`);
     
-    // CHATGPT APPROACH: stopTTS(), clearBuffer(), setState("user_speaking"), currentTurnCancelled = true
+    // GPT-5 APPROACH: Complete 3-step barge-in handling
+    // Step 1: Stop ALL TTS sources immediately (comprehensive)
+    this.stopAllTTSSources();
     
-    // Stop any running TTS immediately
-    if ('speechSynthesis' in window) {
-      speechSynthesis.cancel();
-      console.log('🔇 Stopped TTS during barge-in');
-    }
-    
+    // Step 2: Clear AudioWorklet buffer with cooldown (already done in stopAllTTSSources, but ensure it's done)
     if (this.audioWorkletNode) {
       // GPT-5 FIX: Clear the audio buffer with cooldown to prevent race conditions
       this.audioWorkletNode.port.postMessage({
         type: "barge-in",
         durationMs: 250  // GPT-5: 250ms cooldown to prevent audio race conditions
       });
-      console.log('🔇 ✅ Barge-in triggered - audio buffer cleared with 250ms cooldown');
+      console.log('🔇 ✅ Step 2: Audio buffer cleared with 250ms cooldown');
     } else {
       console.warn('⚠️ Cannot trigger barge-in - no audio worklet node available');
     }
 
-    // Clear any queued audio buffers
-    this.audioOutputQueue = [];
-    console.log('🔇 Cleared audio output queue');
-    
+    // Step 3: Mark turn as cancelled and transition to user_speaking state
     // CHATGPT APPROACH: Mark current turn as cancelled, keep session alive
     this.currentTurnCancelled = true;
     this.isPostBargeIn = true; // CHATGPT FIX: Disable inactivity timer

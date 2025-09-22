@@ -184,9 +184,16 @@ class AudioPlayerProcessor extends AudioWorkletProcessor {
                     break;
                     
                 case "stop":
-                    if (DEBUG) console.log('🛑 Stop message received');
-                    this.audioBuffer.clearBuffer();
+                    if (DEBUG) console.log('🛑 GPT-5: Comprehensive stop message received');
+                    const hadDataOnStop = this.audioBuffer.clearBuffer(300); // Longer cooldown for stop
                     this.isPlaying = false;
+                    
+                    // Notify main thread that stop is complete
+                    this.port.postMessage({
+                        type: "stop-complete",
+                        hadData: hadDataOnStop,
+                        timestamp: Date.now()
+                    });
                     break;
                     
                 case "status":
