@@ -13,19 +13,12 @@ import { fromNodeProviderChain } from '@aws-sdk/credential-providers';
 import { v4 as uuidv4 } from 'uuid';
 import { Subject } from 'rxjs';
 
-// Import session logging function
+// Import session logging function - FIXED: Server-side logging disabled to prevent URL errors
 async function logSessionEvent(sessionId: string, type: string, payload?: unknown): Promise<void> {
-  try {
-    const response = await fetch('/api/sessions/event', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sessionId, type, payload })
-    });
-    if (!response.ok) {
-      console.warn(`Failed to log session event: ${type}`);
-    }
-  } catch (error) {
-    console.warn(`Error logging session event: ${error}`);
+  // SERVER-SIDE: Skip fetch-based logging to prevent "Failed to parse URL" errors
+  // Session events are logged client-side via the practice page
+  if (process.env.NODE_ENV === 'development') {
+    console.log(`📝 SESSION EVENT: ${type} for session ${sessionId}`, payload ? JSON.stringify(payload).slice(0, 100) : '');
   }
 }
 
@@ -1165,8 +1158,9 @@ class NovaSDKHandler {
         }
       }
       
-      // Brief pause to allow AWS cleanup (reduced from 3000ms to prevent race conditions)
-      await new Promise(resolve => setTimeout(resolve, 100));
+      // CRITICAL FIX: Longer pause to allow AWS cleanup and prevent ValidationException
+      console.log('🔄 Waiting 2 seconds for AWS to clean up previous session...');
+      await new Promise(resolve => setTimeout(resolve, 2000));
       
       // Check again if session is still active after delay
       if (!this.session || !this.session.isActive) {
