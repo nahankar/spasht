@@ -1198,6 +1198,7 @@ export class NovaWebSocketAsr implements AsrProvider {
           }
           
           this.consecutiveVoiceDetections++;
+          this.consecutiveSilenceDetections = 0; // Reset silence counter when voice detected
           
           if (this.consecutiveVoiceDetections === 1) {
             if (this.vadMetrics.firstVoiceDetectedAt === 0) {
@@ -1244,7 +1245,18 @@ export class NovaWebSocketAsr implements AsrProvider {
             // No need to send any server messages - just let the user speak
           }
         } else {
-          this.consecutiveVoiceDetections = 0;
+          // CRITICAL FIX: Add grace period before resetting voice detection counter
+          // Don't immediately reset on single low-volume frame - allow brief dips in user speech
+          this.consecutiveSilenceDetections = (this.consecutiveSilenceDetections || 0) + 1;
+          
+          // Only reset voice detection after 3 consecutive low-volume frames (30ms grace period)
+          if (this.consecutiveSilenceDetections >= 3) {
+            if (this.consecutiveVoiceDetections > 0) {
+              console.log(`🎤 🔄 GRACE PERIOD EXPIRED: Resetting voice detection after ${this.consecutiveSilenceDetections} silent frames`);
+            }
+            this.consecutiveVoiceDetections = 0;
+            this.consecutiveSilenceDetections = 0;
+          }
         }
       } else if (shouldMonitorPostBargeIn) {
         // POST-BARGE-IN: Monitor for silence to know when user finished speaking
