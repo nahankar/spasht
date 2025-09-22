@@ -530,6 +530,13 @@ export class NovaWebSocketAsr implements AsrProvider {
             if (message.data.type === 'TEXT' && message.data.role) {
               this.currentRole = message.data.role;
               // console.log(`🏷️ SET GLOBAL ROLE: ${this.currentRole} for ${message.data.type} content`);
+              
+              // GPT-5 FIX: Reset cancelled turn when AI starts new response after barge-in
+              if (this.currentRole === 'ASSISTANT' && this.currentTurnCancelled && this.isPostBargeIn) {
+                console.log('🎯 GPT-5 FIX: New AI turn starting - resetting cancelled state from barge-in');
+                this.currentTurnCancelled = false;
+                this.isPostBargeIn = false;
+              }
             } else if (message.data.type === 'AUDIO') {
               // Reset audio sync flags when new audio content starts
               this.hasAudioStarted = false;
@@ -840,7 +847,15 @@ export class NovaWebSocketAsr implements AsrProvider {
         return;
       }
       
-      // CHATGPT APPROACH: Don't play if turn was cancelled
+      // GPT-5 FIX: Only skip audio for the SAME cancelled turn, not new AI responses
+      // Reset currentTurnCancelled when AI starts a new response after barge-in
+      if (this.currentTurnCancelled && this.isPostBargeIn) {
+        console.log('🎯 GPT-5 FIX: Resetting cancelled turn for new AI response after barge-in');
+        this.currentTurnCancelled = false;
+        this.isPostBargeIn = false;
+      }
+      
+      // Now check if current turn is still cancelled (shouldn't be after reset)
       if (this.currentTurnCancelled) {
         console.log('🎯 CHATGPT: Skipping audio playback - turn was cancelled');
         return;
