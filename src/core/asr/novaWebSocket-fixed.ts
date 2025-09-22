@@ -610,6 +610,7 @@ export class NovaWebSocketAsr implements AsrProvider {
             if (!this.hasAudioStarted) {
               this.hasAudioStarted = true;
               this.audioStartTime = Date.now();
+              console.log(`🎤 🕒 AUDIO START TIME SET: ${this.audioStartTime} (${new Date().toLocaleTimeString()})`);
               
               // Enter conversation mode for barge-in support
               this.isInConversation = true;
@@ -1138,6 +1139,11 @@ export class NovaWebSocketAsr implements AsrProvider {
       const isAudioPlaying = this.audioWorkletNode && this.hasAudioStarted && this.isInConversation;
       const timeSinceAudioStart = this.hasAudioStarted ? Date.now() - (this.audioStartTime || 0) : 0;
       const isInitialPeriod = timeSinceAudioStart < 200; // Reduced to 200ms for faster barge-in response
+      
+      // DEBUG: Log initial period calculation when it should be changing
+      if (this.hasAudioStarted && isInitialPeriod && timeSinceAudioStart > 100) {
+        console.log(`🎤 ⏰ INITIAL PERIOD DEBUG: timeSince=${timeSinceAudioStart}ms, audioStartTime=${this.audioStartTime}, now=${Date.now()}, isInitial=${isInitialPeriod}`);
+      }
       // Monitor during AI audio playback for barge-in detection
       // OR continue monitoring after barge-in to detect when user finishes speaking
       const shouldMonitorForBargeIn = isAudioPlaying && !this.bargeInTriggered && !this.bargeInHangover && !isInitialPeriod && !this.currentTurnCancelled;
