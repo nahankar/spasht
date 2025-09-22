@@ -12,13 +12,25 @@ class ExpandableBuffer {
         this.underflowedSamples = 0;
         this.lastBufferWriteTime = Date.now();
         this.isCleared = false; // Track if buffer was cleared for barge-in
+        this.clearedSamples = 0; // Number of samples to ignore after a clear (GPT-5 fix)
     }
 
     write(data) {
         this.lastBufferWriteTime = Date.now();
+
+        // GPT-5 FIX: If we're in the cleared cooldown, decrement clearedSamples and ignore writes
+        if (this.clearedSamples > 0) {
+            this.clearedSamples = Math.max(0, this.clearedSamples - data.length);
+            // If still in cleared window, ignore this write entirely
+            if (this.clearedSamples > 0) {
+                if (DEBUG) console.log('🔇 Ignoring write during cleared cooldown');
+                return;
+            }
+            // if we've just expired the cooldown, fallthrough and accept writes
+        }
         
-        // If buffer was cleared for barge-in, ignore any remaining queued audio
-        if (this.isCleared) {
+        // Legacy cleared flag check (keeping for compatibility)
+        if (this.isCleared && this.clearedSamples === 0) {
             if (DEBUG) console.log('🔇 Ignoring audio write - buffer cleared for barge-in');
             return;
         }
@@ -41,9 +53,17 @@ class ExpandableBuffer {
     }
 
     read(requestedSamples) {
+        // GPT-5 FIX: Handle cleared cooldown period
+        if (this.clearedSamples > 0) {
+            const toConsume = Math.min(requestedSamples, this.clearedSamples);
+            this.clearedSamples = Math.max(0, this.clearedSamples - toConsume);
+            if (this.clearedSamples === 0) this.isCleared = false;
+            return new Float32Array(requestedSamples); // return silence for this frame
+        }
+        
         const availableSamples = this.writeIndex - this.readIndex;
         
-        // If buffer was cleared, return silence
+        // Legacy cleared flag check (keeping for compatibility)
         if (this.isCleared) {
             return new Float32Array(requestedSamples); // Return silence
         }
@@ -72,21 +92,23 @@ class ExpandableBuffer {
         return result;
     }
 
-    // ENHANCED: Immediate buffer clearing for barge-in
-    clearBuffer() {
+    // GPT-5 ENHANCED: Buffer clearing with cooldown to prevent race conditions
+    clearBuffer(durationMs = 250) {
         const hadData = this.writeIndex > this.readIndex;
         if (DEBUG) console.log(`🔇 ENHANCED: Buffer cleared immediately - had ${hadData ? 'data' : 'no data'}`);
-        
-        // Immediate clearing
-        this.buffer.fill(0); // Zero out the entire buffer
+
+        // Zero buffer and reset indices
+        this.buffer.fill(0);
         this.writeIndex = 0;
         this.readIndex = 0;
         this.underflowedSamples = 0;
-        this.isCleared = true; // Mark as cleared to ignore future writes
-        
-        // Reset cleared flag immediately to allow new audio
-        // Note: setTimeout is not available in AudioWorklet context
-        this.isCleared = false;
+
+        // GPT-5 FIX: Set cooldown in samples (use global sampleRate available in worklet)
+        const ms = Math.max(50, durationMs); // minimum 50ms safety
+        this.clearedSamples = Math.ceil((typeof sampleRate !== 'undefined' ? sampleRate : 48000) * (ms / 1000));
+
+        // mark flag so read() returns silence while clearedSamples > 0
+        this.isCleared = true;
         if (DEBUG) console.log('🔇 ENHANCED: Buffer cleared immediately - had no data');
         
         return hadData;
@@ -148,8 +170,9 @@ class AudioPlayerProcessor extends AudioWorkletProcessor {
                     
                 case "barge-in":
                 case "clear": // Handle both message types
-                    if (DEBUG) console.log(`🔇 ENHANCED: ${type} message received - clearing buffer immediately`);
-                    const hadData = this.audioBuffer.clearBuffer();
+                    if (DEBUG) console.log(`🔇 ENHANCED: ${type} message received - clearing buffer with cooldown`);
+                    const durationMs = event.data.durationMs || 250; // GPT-5: Accept cooldown duration
+                    const hadData = this.audioBuffer.clearBuffer(durationMs);
                     this.isPlaying = false;
                     
                     // Notify main thread of successful clearing

@@ -1442,14 +1442,12 @@ export class NovaWebSocketAsr implements AsrProvider {
     }
     
     if (this.audioWorkletNode) {
-      // Clear the audio buffer to stop current playback immediately
+      // GPT-5 FIX: Clear the audio buffer with cooldown to prevent race conditions
       this.audioWorkletNode.port.postMessage({
         type: "barge-in",
+        durationMs: 250  // GPT-5: 250ms cooldown to prevent audio race conditions
       });
-      this.audioWorkletNode.port.postMessage({
-        type: "clear",
-      });
-      console.log('🔇 ✅ Barge-in triggered - audio buffer cleared immediately');
+      console.log('🔇 ✅ Barge-in triggered - audio buffer cleared with 250ms cooldown');
     } else {
       console.warn('⚠️ Cannot trigger barge-in - no audio worklet node available');
     }
