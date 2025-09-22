@@ -10,7 +10,7 @@ export class NovaRealtimeAsr implements AsrProvider {
 
   private mediaStream: MediaStream | null = null;
   private audioCtx: AudioContext | null = null;
-  private processor: ScriptProcessorNode | null = null;
+  private workletNode: AudioWorkletNode | null = null;
   private writer: WritableStreamDefaultWriter<Uint8Array> | null = null;
   private readerCancel: (() => void) | null = null;
 
@@ -33,11 +33,15 @@ export class NovaRealtimeAsr implements AsrProvider {
       const AC = (window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext);
       const audioCtx = new (AC as typeof AudioContext)();
       this.audioCtx = audioCtx;
+      
+      // Load AudioWorklet processor
+      await audioCtx.audioWorklet.addModule('/worklets/transcribe-processor.js');
+      
       const source = audioCtx.createMediaStreamSource(stream);
-      const processor = audioCtx.createScriptProcessor(4096, 1, 1);
-      this.processor = processor;
-      source.connect(processor);
-      processor.connect(audioCtx.destination);
+      const workletNode = new AudioWorkletNode(audioCtx, 'transcribe-processor');
+      this.workletNode = workletNode;
+      source.connect(workletNode);
+      workletNode.connect(audioCtx.destination);
 
       const { readable, writable } = new TransformStream<Uint8Array>();
       this.writer = writable.getWriter();
@@ -74,13 +78,15 @@ export class NovaRealtimeAsr implements AsrProvider {
         }
       })();
 
-      // Resample to 16k PCM and feed to writer
+      // Handle audio data from the worklet
       const inputRate = audioCtx.sampleRate;
-      processor.onaudioprocess = (e) => {
-        const inBuf = e.inputBuffer.getChannelData(0);
-        const pcm16 = this.floatTo16BitPCM(this.downsample(inBuf, inputRate, 16000));
-        if (this.writer) {
-          try { this.writer.write(pcm16); } catch {}
+      workletNode.port.onmessage = (event) => {
+        if (event.data.type === 'audiodata') {
+          const inBuf = event.data.buffer;
+          const pcm16 = this.floatTo16BitPCM(this.downsample(inBuf, inputRate, 16000));
+          if (this.writer) {
+            try { this.writer.write(pcm16); } catch {}
+          }
         }
       };
 
@@ -97,8 +103,8 @@ export class NovaRealtimeAsr implements AsrProvider {
     this.readerCancel = null;
     try { await this.writer?.close(); } catch {}
     this.writer = null;
-    try { this.processor?.disconnect(); } catch {}
-    this.processor = null;
+    try { this.workletNode?.disconnect(); } catch {}
+    this.workletNode = null;
     try { this.audioCtx?.close(); } catch {}
     this.audioCtx = null;
     try { this.mediaStream?.getTracks().forEach((t) => t.stop()); } catch {}

@@ -68,6 +68,9 @@ model InterviewSession {
   startedAt         DateTime           @default(now())
   completedAt       DateTime?
   
+  // Relations
+  events            SessionEvent[]
+  
   @@map("interview_sessions")
 }
 
@@ -156,4 +159,19 @@ enum BadgeType {
   FLUENCY_MASTER
   CONFIDENCE_BOOST
   GRAMMAR_GURU
+}
+
+model TokenUsage {
+  id            String    @id @default(cuid())
+  sessionId     String    // Link to interview session or practice session
+  speechInput   Int       @default(0)  // Speech input tokens
+  speechOutput  Int       @default(0)  // Speech output tokens  
+  textInput     Int       @default(0)  // Text input tokens
+  textOutput    Int       @default(0)  // Text output tokens
+  totalTokens   Int       @default(0)  // Total tokens used
+  totalCost     Float     @default(0)  // Total cost in USD
+  timestamp     DateTime  @default(now())
+  
+  @@index([sessionId, timestamp])
+  @@map("token_usage")
 }

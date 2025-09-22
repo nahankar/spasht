@@ -23,8 +23,8 @@ export async function createAsrProvider(cfg: AsrFactoryConfig): Promise<AsrInsta
     return new TranscribeAsr();
   };
   const makeNova = async () => {
-    const { NovaRealtimeAsr } = await import("./novaRealtime");
-    return new NovaRealtimeAsr();
+    const { NovaWebSocketAsr } = await import("./novaWebSocket-fixed");
+    return new NovaWebSocketAsr();
   };
 
   if (cfg.failover === "AUTO_SWITCH") {

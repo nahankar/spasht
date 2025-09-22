@@ -3,8 +3,23 @@ import { prisma } from "@/lib/prisma";
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-    const { id, transcript, report, completedAt = new Date().toISOString() } = body || {};
+    // Handle both regular JSON requests and sendBeacon requests
+    let body;
+    const contentType = req.headers.get('content-type');
+    
+    if (contentType?.includes('application/json')) {
+      body = await req.json();
+    } else {
+      // Handle sendBeacon requests (sent as text)
+      const text = await req.text();
+      try {
+        body = JSON.parse(text);
+      } catch {
+        body = {};
+      }
+    }
+    
+    const { id, transcript, report, completedAt = new Date().toISOString(), actualDuration } = body || {};
     if (!id || typeof id !== "string") {
       return NextResponse.json({ error: "missing_id" }, { status: 400 });
     }
@@ -12,7 +27,10 @@ export async function POST(req: NextRequest) {
     if (!existing) return NextResponse.json({ error: "not_found" }, { status: 404 });
 
     const end = new Date(completedAt);
-    const duration = Math.max(0, Math.round((end.getTime() - new Date(existing.startedAt).getTime()) / 1000));
+    // Use actualDuration from client if provided (accounts for pauses), otherwise fallback to calculated duration
+    const duration = actualDuration !== undefined ? 
+      Math.max(0, Math.round(actualDuration)) : 
+      Math.max(0, Math.round((end.getTime() - new Date(existing.startedAt).getTime()) / 1000));
 
     const updated = await prisma.interviewSession.update({
       where: { id },

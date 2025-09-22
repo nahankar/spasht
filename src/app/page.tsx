@@ -39,12 +39,12 @@ export default function Home() {
 
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
             <Link href="/practice">
-              <Button size="lg" className="text-lg px-8 py-3">
-                Start Free Practice
+              <Button size="lg" className="text-lg px-8 py-3 hover:scale-105 active:scale-95 transition-all duration-150 shadow-lg hover:shadow-xl">
+                Start Practice
                 <ArrowRight className="ml-2 h-5 w-5" />
               </Button>
             </Link>
-            <Button variant="outline" size="lg" className="text-lg px-8 py-3">
+            <Button variant="outline" size="lg" className="text-lg px-8 py-3 hover:scale-105 active:scale-95 transition-all duration-150 shadow-lg hover:shadow-xl">
               Watch Demo
             </Button>
           </div>
