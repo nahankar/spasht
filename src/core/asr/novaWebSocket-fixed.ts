@@ -700,6 +700,12 @@ export class NovaWebSocketAsr implements AsrProvider {
               this.currentTurnCancelled = false;
               this.isPostBargeIn = false;
               
+              // GPT-5 SYNC: Treat AWS INTERRUPTED as local barge-in confirmation if we hadn't confirmed
+              if (!this.bargeInTriggered) {
+                console.log('🤝 GPT-5 SYNC: AWS reported INTERRUPTED - handling as local barge-in confirmation');
+                this.triggerBargeIn();
+              }
+
               // CRITICAL: Clear any existing inactivity timer after interruption
               if (this.inactivityTimer) {
                 clearTimeout(this.inactivityTimer);
@@ -1199,7 +1205,8 @@ export class NovaWebSocketAsr implements AsrProvider {
             bargeLog(`🎤 🔍 INSTANT: Voice above threshold (${this.consecutiveVoiceDetections}/3 confirmations, volume: ${rms.toFixed(4)}, threshold: ${dynamicThreshold.toFixed(4)})`);
           }
           
-          if (this.consecutiveVoiceDetections >= 3) { // Reduced from 5 to 3 for faster confirmation
+          // GPT-5 TUNE: Confirm after 2 frames to reduce missed barges
+          if (this.consecutiveVoiceDetections >= 2) {
             const timestamp = new Date().toLocaleTimeString() + '.' + (Date.now() % 1000);
             
             this.vadMetrics.bargeInConfirmedAt = Date.now();
