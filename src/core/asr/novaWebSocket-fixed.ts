@@ -66,6 +66,13 @@ export class NovaWebSocketAsr implements AsrProvider {
   
   // Barge-in volume tracking for logging
   private bargeInVolume: number = 0;
+  // Track first transcription after barge-in for prominent logging
+  private awaitingBargeInTranscription: boolean = false;
+  // Early logging controls for user speech ordering
+  private firstUserPartialLogged: boolean = false;
+  private lastLoggedUserPartialLength: number = 0;
+  private userSpeechStartTime: number = 0;
+  private postBargeInWatchdog: NodeJS.Timeout | null = null;
   
   // Audio start notification tracking
   private hasAudioStartNotified: boolean = false;
@@ -571,6 +578,25 @@ export class NovaWebSocketAsr implements AsrProvider {
                 role: partialRole
               });
             }
+
+            // NEW: Early ordered logging so user speech appears before assistant
+            const userRole = (partialRole || '').toString().toUpperCase();
+            if (userRole === 'USER' && typeof message.text === 'string') {
+              if (!this.userSpeechStartTime) {
+                this.userSpeechStartTime = Date.now();
+              }
+              const text = message.text.trim();
+              if (text.length > 0 && text.length !== this.lastLoggedUserPartialLength) {
+                if (!this.firstUserPartialLogged) {
+                  const vol = this.bargeInVolume > 0 ? ` (volume: ${this.bargeInVolume.toFixed(4)})` : '';
+                  console.log(`%c📥 USER PARTIAL: "${text}" at ${new Date().toLocaleTimeString()}.${Date.now() % 1000}${vol}`, 'color: red; font-weight: bold; background: #fff0f0;');
+                  this.firstUserPartialLogged = true;
+                } else {
+                  console.log(`📥 USER PARTIAL+: "${text}"`);
+                }
+                this.lastLoggedUserPartialLength = text.length;
+              }
+            }
           }
           break;
           
@@ -603,6 +629,19 @@ export class NovaWebSocketAsr implements AsrProvider {
           if (this.responseStartTime === 0) {
             this.responseStartTime = Date.now();
           }
+          
+          // GPT-5 FIX: Reset cancelled turn when new AI audio starts after barge-in
+          if (this.currentTurnCancelled && this.isPostBargeIn && this.currentRole === 'ASSISTANT') {
+            console.log('🎯 GPT-5 FIX: New AI audio starting - resetting cancelled state from barge-in');
+            this.currentTurnCancelled = false;
+            this.isPostBargeIn = false;
+          }
+          
+          // Defensive: fully reset local barge-in flags for fresh playback
+          // Ensures we don't keep treating the session as in a barged state
+          this.bargeInTriggered = false;
+          this.consecutiveVoiceDetections = 0;
+          this.consecutiveSilenceDetections = 0;
           
           // CHATGPT APPROACH: Only play audio if turn not cancelled
           if (!this.currentTurnCancelled) {
@@ -661,7 +700,12 @@ export class NovaWebSocketAsr implements AsrProvider {
         case 'userTranscription':
           // RED console log for user speech with barge-in volume
           const volumeInfo = this.bargeInVolume > 0 ? ` (volume: ${this.bargeInVolume.toFixed(4)})` : '';
-          console.log(`%c📥 USER SAID: "${message.text}" at ${new Date().toLocaleTimeString()}.${Date.now() % 1000}${volumeInfo}`, 'color: red; font-weight: bold; font-size: 14px; background: lightblue;');
+          const postBargeTag = this.awaitingBargeInTranscription ? ' [POST-BARGE-IN]' : '';
+          console.log(`%c📥 USER SAID${postBargeTag}: "${message.text}" at ${new Date().toLocaleTimeString()}.${Date.now() % 1000}${volumeInfo}`, 'color: red; font-weight: bold; font-size: 14px; background: lightblue;');
+          // Clear the flag after the first transcript following a barge-in
+          if (this.awaitingBargeInTranscription) {
+            this.awaitingBargeInTranscription = false;
+          }
           // console.log('📥 User transcription received from Nova Sonic:', message.text);
           if (message.text && this.onFinalCb) {
             const transcript: AsrTranscript = {
@@ -675,6 +719,11 @@ export class NovaWebSocketAsr implements AsrProvider {
             // console.log('📝 Sending userTranscription to transcript handler:', transcript.text);
             this.onFinalCb(transcript);
           }
+
+          // Reset ordered logging flags after final user transcript
+          this.firstUserPartialLogged = false;
+          this.lastLoggedUserPartialLength = 0;
+          this.userSpeechStartTime = 0;
           break;
 
         case 'contentEnd':
@@ -764,6 +813,8 @@ export class NovaWebSocketAsr implements AsrProvider {
             this.hasAudioStarted = false;
             this.bufferedTextResponse = null;
             this.currentTurnCancelled = false;
+            // CRITICAL: Gate audio_start_signal until server confirms readiness again
+            this.isNovaReady = false;
             
             // For ValidationException errors, request immediate server restart
             if (message.error?.includes('ValidationException') || message.error?.includes('The first event must be a SessionStart event')) {
@@ -860,15 +911,7 @@ export class NovaWebSocketAsr implements AsrProvider {
         return;
       }
       
-      // GPT-5 FIX: Only skip audio for the SAME cancelled turn, not new AI responses
-      // Reset currentTurnCancelled when AI starts a new response after barge-in
-      if (this.currentTurnCancelled && this.isPostBargeIn) {
-        console.log('🎯 GPT-5 FIX: Resetting cancelled turn for new AI response after barge-in');
-        this.currentTurnCancelled = false;
-        this.isPostBargeIn = false;
-      }
-      
-      // Now check if current turn is still cancelled (shouldn't be after reset)
+      // Check if current turn is cancelled (should be reset earlier in audio handler)
       if (this.currentTurnCancelled) {
         console.log('🎯 CHATGPT: Skipping audio playback - turn was cancelled');
         return;
@@ -990,6 +1033,17 @@ export class NovaWebSocketAsr implements AsrProvider {
     }
     
     console.log(`🔇 Audio input ${muted ? 'MUTED' : 'UNMUTED'} - ${muted ? 'no audio will be sent to server' : 'audio transmission resumed'}`);
+
+    // NEW: If unmuted during an AI turn, re-enable instant barge-in monitoring automatically
+    if (!muted) {
+      // Reset mute-related flags for detection
+      this.bargeInMuted = false;
+      // If we're mid conversation/audio already started, restart the monitor loop
+      if (this.isInConversation || this.hasAudioStarted) {
+        this.setupInstantBargeInDetection();
+        console.log('🎤 ✅ BARGE-IN MONITORING RE-ENABLED after unmute');
+      }
+    }
   }
   
   isAudioInputMuted(): boolean {
@@ -1129,6 +1183,10 @@ export class NovaWebSocketAsr implements AsrProvider {
     
     this.monitorInterval = setInterval(() => {
       if (!this.independentMicMonitorActive || !this.independentAnalyzer || this.bargeInMuted) {
+        // Inform user occasionally if barge-in monitoring is disabled due to mute
+        if (this.bargeInMuted && Date.now() % 5000 < 40) {
+          console.log('🔇 BARGE-IN DISABLED: Microphone is muted');
+        }
         if (this.monitorInterval) {
           clearInterval(this.monitorInterval);
           this.monitorInterval = null;
@@ -1556,6 +1614,38 @@ export class NovaWebSocketAsr implements AsrProvider {
       reason: 'User barge-in detected'
     });
     console.log('📤 CHATGPT: Sent cancel_current_turn to server - should stop audio generation');
+    
+    // Mark that we expect the next user transcription to be the barge-in utterance
+    this.awaitingBargeInTranscription = true;
+
+    // Start a short watchdog to nudge ASR after barge-in if needed
+    if (this.postBargeInWatchdog) {
+      clearTimeout(this.postBargeInWatchdog);
+    }
+    const start = Date.now();
+    const nudge = () => {
+      // If we already got a transcription, stop
+      if (!this.awaitingBargeInTranscription) return;
+      // Only nudge while we are listening and not muted
+      const canNudge = (this.state === 'listening') && !this.audioInputMuted;
+      if (canNudge && this.ws && this.ws.readyState === WebSocket.OPEN && this.isNovaReady) {
+        // Re-assert that user is speaking so server doesn’t gate audio
+        if (!this.hasAudioStartNotified) {
+          this.sendMessage({ type: 'audioStart' });
+          this.hasAudioStartNotified = true;
+          console.log('🎤 🔁 Watchdog: re-sent audio_start_signal post-barge-in');
+        }
+      }
+      if (Date.now() - start < 2000) {
+        this.postBargeInWatchdog = setTimeout(nudge, 300);
+      } else {
+        if (this.awaitingBargeInTranscription) {
+          console.log('%c⚠️ USER SPEAKING NOT CAPTURED (no ASR within 2s post-barge-in)', 'color: red; font-weight: bold;');
+          this.awaitingBargeInTranscription = false;
+        }
+      }
+    };
+    this.postBargeInWatchdog = setTimeout(nudge, 300);
     
     // CRITICAL: Notify the main application about the barge-in event
     // This will trigger the state transition from 'ai_responding' to 'user_speaking'

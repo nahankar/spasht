@@ -481,15 +481,25 @@ class NovaSDKHandler {
             this.assistantTurnActive = false;
           }
           
-          // GENTLE APPROACH: Just transition to listening for user input
-          // Don't send artificial audio - let Nova Sonic handle natural interruption
+          // Forward an INTERRUPTED to Nova to end current assistant turn immediately
+          if (this.session) {
+            const interruptEvent = {
+              event: {
+                contentEnd: {
+                  promptName: this.session.promptName,
+                  contentName: this.session.contentName,
+                  stopReason: 'INTERRUPTED'
+                }
+              }
+            };
+            this.addEventToQueue(interruptEvent);
+            console.log('🔇 ⚡ Forwarded INTERRUPTED contentEnd to Nova to stop assistant turn');
+          }
+          
+          // Transition to listening for user input
           console.log('🔇 ⚡ Graceful barge-in - ready for user input without forcing stream interruption');
           
-          // Notify client that turn was cancelled successfully
-          this.sendMessage({
-            type: 'info',
-            message: 'Current turn cancelled - ready for new input'
-          });
+          // No custom server message (to keep ServerMessage type strict)
           break;
           
         case 'pause':
