@@ -82,6 +82,10 @@ export class NovaWebSocketAsr implements AsrProvider {
   private hasAudioStarted: boolean = false;
   private audioStartTime: number = 0; // Track when audio playback starts
 
+  // Buffer mic audio briefly post-barge until Nova is ready
+  private postBargeAudioBuffer: string[] = [];
+  private readonly maxPostBargeBuffer: number = 50; // ~500ms at 10ms frames
+
   // FIXED: Track initialization state
   private isSessionStarted = false;
   private isPromptStartReady = false;
@@ -337,7 +341,9 @@ export class NovaWebSocketAsr implements AsrProvider {
           // CHATGPT APPROACH: Simplified audio sending logic
           const wsReady = this.ws && this.ws.readyState === WebSocket.OPEN;
           const isListeningOrConversation = (this.state === "listening" || (this.isInConversation && this.shouldContinueListening));
-          const shouldSendAudio = wsReady && this.isNovaReady && this.isAudioStarted && isListeningOrConversation && !this.currentTurnCancelled && !this.audioInputMuted;
+          // Allow user audio during post-barge-in even if the cancelled flag is still set
+          const turnAllowsAudio = (!this.currentTurnCancelled) || this.isPostBargeIn;
+          const shouldSendAudio = wsReady && this.isNovaReady && this.isAudioStarted && isListeningOrConversation && turnAllowsAudio && !this.audioInputMuted;
           
               
           if (shouldSendAudio) {
@@ -397,24 +403,39 @@ export class NovaWebSocketAsr implements AsrProvider {
               }
             }
             
-            // Convert to 16-bit PCM and send to Nova
+            // Convert to 16-bit PCM
             const pcmData = this.floatToPCM16(inputData);
             const base64Data = this.arrayBufferToBase64(pcmData.buffer as ArrayBuffer);
-            
-            this.sendMessage({
-              type: 'audio',
-              data: base64Data,
-              sampleRate: 16000
-            });
+
+            // If we are post-barge and Nova not ready yet, buffer briefly instead of dropping
+            if (this.isPostBargeIn && !this.isNovaReady) {
+              if (this.postBargeAudioBuffer.length < this.maxPostBargeBuffer) {
+                this.postBargeAudioBuffer.push(base64Data);
+              } else {
+                // keep buffer bounded (drop oldest)
+                this.postBargeAudioBuffer.shift();
+                this.postBargeAudioBuffer.push(base64Data);
+              }
+            } else {
+              // Flush any buffered frames first when Nova becomes ready
+              if (this.isNovaReady && this.postBargeAudioBuffer.length > 0) {
+                const frames = this.postBargeAudioBuffer.splice(0);
+                for (const frame of frames) {
+                  this.sendMessage({ type: 'audio', data: frame, sampleRate: 16000 });
+                }
+              }
+              // Send current frame
+              this.sendMessage({ type: 'audio', data: base64Data, sampleRate: 16000 });
+            }
           } else {
             // Audio is blocked - log the reason (only occasionally to avoid spam)
             if (Date.now() % 2000 < 50) { // Log every 2 seconds
-              const reasons = [];
+              const reasons = [] as string[];
               if (!wsReady) reasons.push('websocket not ready');
               if (!this.isNovaReady) reasons.push('Nova not ready');
               if (!this.isAudioStarted) reasons.push('audio not started');
               if (!isListeningOrConversation) reasons.push('not in listening state');
-              if (this.currentTurnCancelled) reasons.push('turn cancelled');
+              if (this.currentTurnCancelled && !this.isPostBargeIn) reasons.push('turn cancelled');
               if (this.audioInputMuted) reasons.push('🔇 AUDIO MUTED');
               
               console.log(`🚫 Audio blocked: ${reasons.join(', ')}`);
@@ -1615,6 +1636,9 @@ export class NovaWebSocketAsr implements AsrProvider {
     });
     console.log('📤 CHATGPT: Sent cancel_current_turn to server - should stop audio generation');
     
+    // Gate local readiness until server re-acknowledges after cancel/restart
+    this.isNovaReady = false;
+    
     // Mark that we expect the next user transcription to be the barge-in utterance
     this.awaitingBargeInTranscription = true;
 
@@ -1623,11 +1647,15 @@ export class NovaWebSocketAsr implements AsrProvider {
       clearTimeout(this.postBargeInWatchdog);
     }
     const start = Date.now();
+    let readinessSeen = false;
     const nudge = () => {
       // If we already got a transcription, stop
       if (!this.awaitingBargeInTranscription) return;
       // Only nudge while we are listening and not muted
       const canNudge = (this.state === 'listening') && !this.audioInputMuted;
+      if (this.isNovaReady) {
+        readinessSeen = true;
+      }
       if (canNudge && this.ws && this.ws.readyState === WebSocket.OPEN && this.isNovaReady) {
         // Re-assert that user is speaking so server doesn’t gate audio
         if (!this.hasAudioStartNotified) {
@@ -1636,11 +1664,15 @@ export class NovaWebSocketAsr implements AsrProvider {
           console.log('🎤 🔁 Watchdog: re-sent audio_start_signal post-barge-in');
         }
       }
-      if (Date.now() - start < 2000) {
+      if (Date.now() - start < 3000) {
         this.postBargeInWatchdog = setTimeout(nudge, 300);
       } else {
         if (this.awaitingBargeInTranscription) {
-          console.log('%c⚠️ USER SPEAKING NOT CAPTURED (no ASR within 2s post-barge-in)', 'color: red; font-weight: bold;');
+          if (readinessSeen) {
+            console.log('%c⚠️ USER SPEAKING NOT CAPTURED (no ASR within 3s post-barge-in with readiness)', 'color: red; font-weight: bold;');
+          } else {
+            console.log('⏳ Post-barge-in window ended without Nova readiness; suppressing ASR-miss warning');
+          }
           this.awaitingBargeInTranscription = false;
         }
       }

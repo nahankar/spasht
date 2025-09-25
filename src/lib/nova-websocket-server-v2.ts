@@ -469,7 +469,36 @@ class NovaSDKHandler {
         case 'cancel_current_turn':
           console.log('🔇 ⚡ Cancel current turn request received from client - graceful interruption');
           
-          // Save any accumulated text to conversation history before cancelling
+          // Forward an INTERRUPTED to Nova to end current assistant/ongoing turn immediately
+          // Do this BEFORE mutating assistantTurnActive so it always fires
+          if (this.session) {
+            // Debounce multiple cancels within a short window
+            // @ts-ignore - attach ephemeral field on instance for debounce tracking
+            this._lastInterruptAt = this._lastInterruptAt || 0;
+            // @ts-ignore
+            const now = Date.now();
+            // @ts-ignore
+            if (now - this._lastInterruptAt > 200) {
+              const interruptEvent = {
+                event: {
+                  contentEnd: {
+                    // IMPORTANT: include promptName/contentName to satisfy AWS schema
+                    promptName: this.session.promptName,
+                    contentName: this.session.contentName,
+                    stopReason: 'INTERRUPTED'
+                  }
+                }
+              };
+              this.addEventToQueue(interruptEvent);
+              console.log('🔇 ⚡ Forwarded INTERRUPTED contentEnd to Nova to stop assistant turn');
+              // @ts-ignore
+              this._lastInterruptAt = now;
+            } else {
+              console.log('⏱️ Skipping duplicate INTERRUPTED within debounce window');
+            }
+          }
+
+          // Save any accumulated text to conversation history after signalling interruption
           if (this.accumulatedAssistantText.trim().length > 0) {
             console.log(`📜 MEMORY: Saving accumulated assistant text before turn cancellation: "${this.accumulatedAssistantText.trim().substring(0, 100)}..."`); 
             this.conversationHistory.push({
@@ -478,22 +507,14 @@ class NovaSDKHandler {
             });
             console.log(`📜 MEMORY: Preserved assistant response in conversation history (${this.conversationHistory.length} total messages)`);
             this.accumulatedAssistantText = '';
-            this.assistantTurnActive = false;
           }
+          // Mark assistant/user turn closed locally
+          this.assistantTurnActive = false;
           
-          // Forward an INTERRUPTED to Nova to end current assistant turn immediately
+          // Gate audio readiness until Nova re-acknowledges
           if (this.session) {
-            const interruptEvent = {
-              event: {
-                contentEnd: {
-                  promptName: this.session.promptName,
-                  contentName: this.session.contentName,
-                  stopReason: 'INTERRUPTED'
-                }
-              }
-            };
-            this.addEventToQueue(interruptEvent);
-            console.log('🔇 ⚡ Forwarded INTERRUPTED contentEnd to Nova to stop assistant turn');
+            this.session.isReadyForAudio = false;
+            console.log('🔒 Gated isReadyForAudio=false after cancel; will re-enable on usageEvent or contentStart(AUDIO)');
           }
           
           // Transition to listening for user input
